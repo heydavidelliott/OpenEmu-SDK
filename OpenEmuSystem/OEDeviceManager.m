@@ -34,6 +34,7 @@
 #import "OEPS3HIDDeviceHandler.h"
 #import "OEPS4HIDDeviceHandler.h"
 #import "OEXBox360HIDDeviceHander.h"
+#import "OEGIPUSBDeviceHandler.h"
 #import "OETouchbarHIDDeviceHandler.h"
 #import "OEHIDEvent_Internal.h"
 
@@ -203,6 +204,15 @@ static const void * kOEBluetoothDevicePairSyncStyleKey = &kOEBluetoothDevicePair
 
     IOHIDManagerSetDeviceMatchingMultiple(_hidManager, (__bridge CFArrayRef)matchingTypes);
 
+    // Wired Xbox One/Series controllers that no system driver claims are not
+    // HID devices, so they are discovered and driven over USB separately.
+    __weak typeof(self) weakSelf = self;
+    [OEGIPUSBDeviceHandler startMonitoringWithAddHandler:^(OEGIPUSBDeviceHandler *handler) {
+        [weakSelf OE_addDeviceHandler:handler];
+    } removeHandler:^(OEGIPUSBDeviceHandler *handler) {
+        [weakSelf OE_removeDeviceHandler:handler];
+    }];
+
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(OE_wiimoteDeviceDidDisconnect:) name:OEWiimoteDeviceHandlerDidDisconnectNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(OE_applicationWillTerminate:) name:NSApplicationWillTerminateNotification object:nil];
 }
@@ -311,6 +321,7 @@ static const void * kOEBluetoothDevicePairSyncStyleKey = &kOEBluetoothDevicePair
 {
     _OEDeviceManagerEventMonitor *monitor = [_OEDeviceManagerEventMonitor monitorWithGlobalMonitorHandler:handler];
     [_globalEventListeners addObject:monitor];
+    [self OE_updateExclusiveDeviceDemand];
 
     dispatch_async(dispatch_get_main_queue(), ^{
         [[NSNotificationCenter defaultCenter] postNotificationName:OEDeviceManagerDidAddGlobalEventMonitorHandlerNotification object:self];
@@ -337,6 +348,7 @@ static const void * kOEBluetoothDevicePairSyncStyleKey = &kOEBluetoothDevicePair
 {
     _OEDeviceManagerEventMonitor *monitor = [_OEDeviceManagerEventMonitor monitorWithEventMonitorHandler:handler];
     [_unhandledEventListeners addObject:monitor];
+    [self OE_updateExclusiveDeviceDemand];
     return monitor;
 }
 
@@ -350,6 +362,7 @@ static const void * kOEBluetoothDevicePairSyncStyleKey = &kOEBluetoothDevicePair
 
     [_globalEventListeners removeObject:monitor];
     [_unhandledEventListeners removeObject:monitor];
+    [self OE_updateExclusiveDeviceDemand];
 
     NSMutableArray<OEDeviceHandler *> *keysToRemove = [NSMutableArray array];
     [_deviceHandlersToEventListeners enumerateKeysAndObjectsUsingBlock:^(OEDeviceHandler *key, NSHashTable *monitors, BOOL *stop) {
@@ -360,6 +373,14 @@ static const void * kOEBluetoothDevicePairSyncStyleKey = &kOEBluetoothDevicePair
     }];
 
     [_deviceHandlersToEventListeners removeObjectsForKeys:keysToRemove];
+}
+
+/// Some controllers can only be read by one process at a time. A process takes
+/// them while it consumes input: the game helper through its unhandled event
+/// monitor, and the controls preferences through a global event monitor.
+- (void)OE_updateExclusiveDeviceDemand
+{
+    [OEGIPUSBDeviceHandler setWantsDevices:_globalEventListeners.count > 0 || _unhandledEventListeners.count > 0];
 }
 
 #pragma mark - Keyboard management
