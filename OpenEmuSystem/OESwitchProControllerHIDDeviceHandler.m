@@ -736,7 +736,7 @@ static CGFloat OEHACScaleValueWithCalibration(
             return NO;
         }
         const OEHACUSBAcknowledgmentOutputReport *response = respData.bytes;
-        if (response->reportID != OEHACInputReportIDUSBSubcommandReply) {
+        if ((uint8_t)response->reportID != OEHACInputReportIDUSBSubcommandReply) {
             NSLog(@"[dev %p] Invalid ACK from controller (USB subcommand %02X)", self, cmdid);
             return NO;
         }
